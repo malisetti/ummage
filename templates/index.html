@@ -1,29 +1,29 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-    <title>{{.Title}}</title>
-  </head>
-  <body>
-    <h1>{{.Headline}}</h1>
-    <p>{{.Information}}</p>
-    <form action="/" method="POST" enctype="multipart/form-data">
-      {{.csrfField}} <label for="resource">Image</label>
-      <input
-        required
-        type="file"
-        name="resource"
-        accept="image/*"
-        alt="File to upload"
-      />
 
-      <label for="caption">Caption</label>
-      <input type="text" name="caption" alt="Caption" />
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <title>{{.Title}}</title>
+</head>
 
-      <label for="destruct-key">Destruct Key</label>
-      <input type="password" name="destruct-key" alt="Destruct Key" />
+<body>
+  <h1>{{.Headline}}</h1>
+  <p>{{.Information}}</p>
+  <form action="/" method="POST" enctype="multipart/form-data">
+    {{.csrfField}} <label for="resource">Image</label>
+    <input required type="file" name="resource" accept="image/*" alt="File to upload" />
 
-      <input type="submit" value="Submit" name="submit" />
-    </form>
-  </body>
+    <label for="caption">Caption</label>
+    <input type="text" name="caption" alt="Caption" />
+
+    <label for="destruct-key">Destruct Key</label>
+    <input type="password" name="destruct-key" alt="Destruct Key" />
+
+    <input type="submit" value="Submit" name="submit" />
+  </form>
+</body>
+
 </html>

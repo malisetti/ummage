@@ -25,12 +25,13 @@ import (
 	"github.com/gorilla/mux"
 	_ "github.com/mattn/go-sqlite3"
 	minio "github.com/minio/minio-go"
-	"github.com/mseshachalam/imgshare/pkg/resource"
+	"github.com/mseshachalam/ummage/pkg/resource"
 	"github.com/satori/go.uuid"
 	"golang.org/x/crypto/scrypt"
 	"golang.org/x/sync/errgroup"
 )
 
+const presignedURLExpiry = time.Second * 1
 const maxAllowedImgSize = 16 << 20
 
 // Make a new bucket called images.
@@ -43,6 +44,7 @@ const secretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 const createResourcesTable = `CREATE TABLE IF NOT EXISTS resource (
 	id	INTEGER PRIMARY KEY AUTOINCREMENT,
 	uuid TEXT NOT NULL UNIQUE,
+	name TEXT,
 	created_on	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	deleted_on	datetime,
 	uploaded_at	TEXT NOT NULL,
@@ -52,8 +54,6 @@ const createResourcesTable = `CREATE TABLE IF NOT EXISTS resource (
 	destruct_key	BLOB,
 	destruct_key_salt	BLOB
 );`
-
-const insertToResourcesTable = `INSERT INTO resource(uuid, uploaded_at, caption, content_type, destruct_key, destruct_key_salt) values(?,?,?,?,?,?)`
 
 const location = "us-east-1"
 
@@ -119,8 +119,8 @@ func init() {
 }
 
 type app struct {
-	DB          *sql.DB
-	MinioClient *minio.Client
+	DB                    *sql.DB
+	ResourceStorageClient *minio.Client
 }
 
 func getRandomBytes(n int) ([]byte, error) {
@@ -196,45 +196,43 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 		"name": handler.Filename,
 	}
 
-	_, err = a.MinioClient.PutObjectWithContext(r.Context(), bucketName, u.String(), file, handler.Size, minio.PutObjectOptions{UserMetadata: userMetadata, ContentType: fileType, ContentDisposition: handler.Header.Get("Content-Disposition")})
+	f.Name = handler.Filename
+
+	_, err = a.ResourceStorageClient.PutObjectWithContext(r.Context(), bucketName, u.String(), file, handler.Size, minio.PutObjectOptions{UserMetadata: userMetadata, ContentType: fileType, ContentDisposition: handler.Header.Get("Content-Disposition")})
 
 	if err != nil {
 		fmt.Fprintf(w, "error is %s", err)
 		return
 	}
 
-	reqParams := make(url.Values) // TODO: give all the goodies of image serving
-	reqParams.Set("response-content-disposition", "attachment; filename=\\"+handler.Filename+"\"")
-
-	// Generates a presigned url which expires in a day.
-	presignedURL, err := a.MinioClient.PresignedGetObject(bucketName, u.String(), time.Second*24*60*60, reqParams)
-	if err != nil {
-		fmt.Fprintf(w, "error is %s", err)
-		return
-	}
-
-	f.UploadedAt = presignedURL.String()
-
-	stmt, err := a.DB.Prepare(insertToResourcesTable)
+	stmt, err := a.DB.Prepare(`INSERT INTO resource(uuid, name, caption, content_type, destruct_key, destruct_key_salt) values(?,?,?,?,?,?)`)
 	if err != nil {
 		fmt.Fprintf(w, "error is %s", err)
 		return
 	}
 	defer stmt.Close()
 
-	_, err = stmt.Exec(f.UUID, f.UploadedAt, f.Caption, f.ContentType, f.DestructKey, f.DestructKeySalt)
+	_, err = stmt.Exec(f.UUID, f.Name, f.Caption, f.ContentType, f.DestructKey, f.DestructKeySalt)
 	if err != nil {
 		fmt.Fprintf(w, "error is %s", err)
 		return
 	}
 
-	http.Redirect(w, r, fmt.Sprintf("/i/%s", f.UUID), http.StatusPermanentRedirect)
+	// show upload response page
+	p := map[string]interface{}{
+		"Title":   "Ummimg",
+		"Caption": f.Caption,
+		"Uuid":    f.UUID,
+	}
+
+	t, _ := template.ParseFiles("templates/upload-response.html")
+	t.Execute(w, p)
 }
 
 func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	stmt, err := a.DB.Prepare("select created_on, uploaded_at, caption, content_type from resource where uuid = ?")
+	stmt, err := a.DB.Prepare("select name, created_on, uploaded_at, caption, content_type from resource where uuid = ?")
 	if err != nil {
 		fmt.Fprintf(w, "error is %s", err)
 		return
@@ -244,7 +242,17 @@ func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	uuid := vars["id"]
 	row := stmt.QueryRow(uuid)
-	err = row.Scan(&f.CreatedOn, &f.UploadedAt, &f.Caption, &f.ContentType)
+	err = row.Scan(&f.Name, &f.CreatedOn, &f.Caption, &f.ContentType)
+	if err != nil {
+		fmt.Fprintf(w, "error is %s", err)
+		return
+	}
+
+	reqParams := make(url.Values) // TODO: give all the goodies of image serving
+	reqParams.Set("response-content-disposition", "attachment; filename=\\"+f.Name+"\"")
+
+	// Generates a presigned url which expires in a day.
+	uploadedAt, err := a.ResourceStorageClient.PresignedGetObject(bucketName, uuid, presignedURLExpiry, reqParams)
 	if err != nil {
 		fmt.Fprintf(w, "error is %s", err)
 		return
@@ -253,7 +261,7 @@ func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 	p := map[string]interface{}{
 		"Title":          "Ummimg",
 		"Caption":        f.Caption,
-		"Src":            f.UploadedAt,
+		"Src":            uploadedAt,
 		"Uuid":           uuid,
 		csrf.TemplateTag: csrf.TemplateField(r),
 	}
@@ -262,8 +270,42 @@ func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 	t.Execute(w, p)
 }
 
+func (a *app) deleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+
+	uuid := vars["id"]
+
+	stmt, err := a.DB.Prepare("select caption from resource where uuid = ?")
+	if err != nil {
+		fmt.Fprintf(w, "error is %s", err)
+		return
+	}
+
+	var caption string
+	row := stmt.QueryRow(uuid)
+	err = row.Scan(&caption)
+	if err != nil {
+		fmt.Fprintf(w, "error is %s", err)
+		return
+	}
+
+	p := map[string]interface{}{
+		"Title":          "Ummimg",
+		"Caption":        caption,
+		csrf.TemplateTag: csrf.TemplateField(r),
+	}
+
+	t, _ := template.ParseFiles("templates/destruct.html")
+	t.Execute(w, p)
+}
+
 func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
+
+	destructKey := r.FormValue("destruct-key")
+	if len(destructKey) == 0 {
+		log.Println("stay on the same page with error")
+	}
 
 	stmt, err := a.DB.Prepare("select destruct_key, destruct_key_salt from resource where uuid = ?")
 	if err != nil {
@@ -282,42 +324,38 @@ func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	destructKey := strings.TrimSpace(r.FormValue("destruct-key"))
-
-	if len(destructKey) != 0 {
-		dk, err := scrypt.Key([]byte(destructKey), f.DestructKeySalt, 32768, 8, 1, 32)
-		if err != nil {
-			fmt.Fprintf(w, "error is %s", err)
-			return
-		}
-		if bytes.Compare(dk, f.DestructKey) == 0 {
-			_, err = a.DB.Exec("DELETE FROM resource WHERE uuid = ?;", uuid)
-			// delete the file
-			err = a.MinioClient.RemoveObject(bucketName, uuid)
-			if err != nil {
-				fmt.Println(err)
-				http.Redirect(w, r, "/", http.StatusPermanentRedirect)
-			}
-		} else {
-			log.Println("wrong creds")
+	dk, err := scrypt.Key([]byte(destructKey), f.DestructKeySalt, 32768, 8, 1, 32)
+	if err != nil {
+		fmt.Fprintf(w, "error is %s", err)
+		return
+	}
+	if bytes.Compare(dk, f.DestructKey) == 0 {
+		_, err = a.DB.Exec("DELETE FROM resource WHERE uuid = ?;", uuid)
+		// delete the file
+		err = a.ResourceStorageClient.RemoveObject(bucketName, uuid)
+		if err == nil {
+			http.Redirect(w, r, "/", http.StatusPermanentRedirect)
 		}
 	} else {
-		log.Println("stay on the same page with error")
+		log.Println("wrong creds")
 	}
 }
 
 func main() {
 	defer db.Close()
 	a := &app{
-		MinioClient: minioClient,
-		DB:          db,
+		ResourceStorageClient: minioClient,
+		DB: db,
 	}
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", a.indexHandler).Methods("GET")
 	r.HandleFunc("/", a.uploadFileHandler).Methods("POST")
+
 	r.HandleFunc("/i/{id}", a.viewFileHandler).Methods("GET")
-	r.HandleFunc("/i/{id}", a.deleteFileHandler).Methods("POST")
+
+	r.HandleFunc("/i/{id}/destruct", a.deleteFileViewHandler).Methods("GET")
+	r.HandleFunc("/i/{id}/destruct", a.deleteFileHandler).Methods("POST")
 
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(dir))))
 

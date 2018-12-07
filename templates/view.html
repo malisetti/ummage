@@ -1,16 +1,37 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-    <title>{{.Title}}</title>
-  </head>
-  <body>
-    <h1>{{.Caption}}</h1>
-    <img src="{{.Src}}" alt="{{.Caption}}" />
-    <form action="/i/{{.Uuid}}" method="post">
-      {{.csrfField}} <label for="destruct-key">Destruct Key</label>
-      <input type="password" name="destruct-key" />
-      <input type="submit" name="submit" value="Destruct" />
-    </form>
-  </body>
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>{{.Title}}</title>
+</head>
+
+<body>
+  <h1>{{.Caption}}</h1>
+  <img src="{{.Src}}" id="x-image" alt="{{.Caption}}" />
+
+  <script type="text/javascript">
+    function randomIntFromInterval(min, max, choice) // min and max included
+    {
+      switch (choice) {
+        case 1:
+          return Math.floor(Math.random() * max) + min
+
+        default:
+          return Math.floor(Math.random() * (max - min + 1) + min);
+      }
+    }
+    const ximg = document.getElementById("x-image");
+    ximg.onload = function () {
+      setTimeout(() => {
+        const body = document.getElementsByTagName("BODY")[0];
+        body.innerHTML = "";
+
+      }, randomIntFromInterval(200, 300, Date.now() % 2)); //Math.floor(Math.random() * 6) + 300
+    }
+  </script>
+</body>
+
 </html>

@@ -38,7 +38,7 @@ type Resource struct {
 	ID int
 
 	UUID        string
-	UploadedAt  string // link to storage provider
+	Name        string
 	Caption     string
 	ContentType string
 
