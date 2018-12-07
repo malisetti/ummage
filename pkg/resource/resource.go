@@ -3,7 +3,6 @@ package resource
 import (
 	"bytes"
 	"fmt"
-	"time"
 
 	"golang.org/x/crypto/scrypt"
 )
@@ -44,10 +43,6 @@ type Resource struct {
 
 	DestructKey     []byte // when this is entered we delete the img
 	DestructKeySalt []byte // treat this as password
-
-	CreatedOn   time.Time
-	DeletedOn   time.Time
-	LastVisitOn time.Time
 }
 
 func (r *Resource) canDelete(choice deletionChoice, deletionPassword []byte) (bool, error) {
@@ -63,6 +58,6 @@ func (r *Resource) canDelete(choice deletionChoice, deletionPassword []byte) (bo
 		return false, fmt.Errorf("can not delete the img using the given key")
 
 	default:
-		return r.LastVisitOn.Add(time.Second * 24 * 60 * 60).After(time.Now()), nil
+		return false, fmt.Errorf("only one way exists to delete the resource")
 	}
 }

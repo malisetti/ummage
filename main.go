@@ -45,8 +45,6 @@ const createResourcesTable = `CREATE TABLE IF NOT EXISTS resource (
 	id	INTEGER PRIMARY KEY AUTOINCREMENT,
 	uuid TEXT NOT NULL UNIQUE,
 	name TEXT,
-	created_on	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	deleted_on	datetime,
 	uploaded_at	TEXT NOT NULL,
 	caption	TEXT,
 	content_type	TEXT NOT NULL,
