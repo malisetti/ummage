@@ -41,18 +41,6 @@ const endpoint = "localhost:9000"
 const accessKeyID = "AKIAIOSFODNN7EXAMPLE"
 const secretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 
-const createResourcesTable = `CREATE TABLE IF NOT EXISTS resource (
-	id	INTEGER PRIMARY KEY AUTOINCREMENT,
-	uuid TEXT NOT NULL UNIQUE,
-	name TEXT,
-	uploaded_at	TEXT NOT NULL,
-	caption	TEXT,
-	content_type	TEXT NOT NULL,
-	last_visit_on	datetime,
-	destruct_key	BLOB,
-	destruct_key_salt	BLOB
-);`
-
 const location = "us-east-1"
 
 var dir string
@@ -100,7 +88,17 @@ func init() {
 			return
 		}
 
-		_, err = db.Exec(createResourcesTable)
+		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS resource (
+			id	INTEGER PRIMARY KEY AUTOINCREMENT,
+			uuid TEXT NOT NULL UNIQUE,
+			name TEXT,
+			uploaded_at	TEXT NOT NULL,
+			caption	TEXT,
+			content_type	TEXT NOT NULL,
+			last_visit_on	datetime,
+			destruct_key	BLOB,
+			destruct_key_salt	BLOB
+		);`)
 		if err != nil {
 			return
 		}
@@ -164,7 +162,6 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "Internal server error %s", err)
 			return
 		}
-		destructKey = strings.TrimSpace(destructKey)
 		hash, _ := scrypt.Key([]byte(destructKey), destructKeySalt, 32768, 8, 1, 32)
 
 		f.DestructKey = hash
@@ -178,14 +175,14 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	file, handler, err := r.FormFile("resource")
 	if err != nil {
-		fmt.Fprintf(w, "Failed to retrieve img. Caused error is %s", err)
+		fmt.Fprintf(w, "Failed to receive img. Caused error is %s", err)
 		return
 	}
 	defer file.Close()
 
 	fileType := handler.Header.Get("Content-Type")
 	if !strings.HasPrefix(fileType, "image/") {
-		fmt.Fprintf(w, "could not determine the file type %s, please retry.", handler.Header.Get(""))
+		fmt.Fprintf(w, "Could not determine the file type %s, please retry.", handler.Header.Get(""))
 	}
 
 	f.ContentType = fileType
@@ -199,20 +196,20 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = a.ResourceStorageClient.PutObjectWithContext(r.Context(), bucketName, u.String(), file, handler.Size, minio.PutObjectOptions{UserMetadata: userMetadata, ContentType: fileType, ContentDisposition: handler.Header.Get("Content-Disposition")})
 
 	if err != nil {
-		fmt.Fprintf(w, "error is %s", err)
+		fmt.Fprintf(w, "Internal server error %s", err)
 		return
 	}
 
 	stmt, err := a.DB.Prepare(`INSERT INTO resource(uuid, name, caption, content_type, destruct_key, destruct_key_salt) values(?,?,?,?,?,?)`)
 	if err != nil {
-		fmt.Fprintf(w, "error is %s", err)
+		fmt.Fprintf(w, "Internal server error %s", err)
 		return
 	}
 	defer stmt.Close()
 
 	_, err = stmt.Exec(f.UUID, f.Name, f.Caption, f.ContentType, f.DestructKey, f.DestructKeySalt)
 	if err != nil {
-		fmt.Fprintf(w, "error is %s", err)
+		fmt.Fprintf(w, "Internal server error %s", err)
 		return
 	}
 
@@ -230,7 +227,7 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	stmt, err := a.DB.Prepare("select name, created_on, uploaded_at, caption, content_type from resource where uuid = ?")
+	stmt, err := a.DB.Prepare("select name, uploaded_at, caption, content_type from resource where uuid = ?")
 	if err != nil {
 		fmt.Fprintf(w, "error is %s", err)
 		return
@@ -240,9 +237,10 @@ func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	uuid := vars["id"]
 	row := stmt.QueryRow(uuid)
-	err = row.Scan(&f.Name, &f.CreatedOn, &f.Caption, &f.ContentType)
+	err = row.Scan(&f.Name, &f.Caption, &f.ContentType)
 	if err != nil {
-		fmt.Fprintf(w, "error is %s", err)
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, "Requested image not found %s", err)
 		return
 	}
 
@@ -252,7 +250,8 @@ func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 	// Generates a presigned url which expires in a day.
 	uploadedAt, err := a.ResourceStorageClient.PresignedGetObject(bucketName, uuid, presignedURLExpiry, reqParams)
 	if err != nil {
-		fmt.Fprintf(w, "error is %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "Internal server error %s", err)
 		return
 	}
 
@@ -275,7 +274,7 @@ func (a *app) deleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
 
 	stmt, err := a.DB.Prepare("select caption from resource where uuid = ?")
 	if err != nil {
-		fmt.Fprintf(w, "error is %s", err)
+		fmt.Fprintf(w, "Internal server error %s", err)
 		return
 	}
 
@@ -283,7 +282,8 @@ func (a *app) deleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
 	row := stmt.QueryRow(uuid)
 	err = row.Scan(&caption)
 	if err != nil {
-		fmt.Fprintf(w, "error is %s", err)
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, "Requested image not found %s", err)
 		return
 	}
 
@@ -307,7 +307,8 @@ func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	stmt, err := a.DB.Prepare("select destruct_key, destruct_key_salt from resource where uuid = ?")
 	if err != nil {
-		fmt.Fprintf(w, "error is %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "Internal server error %s", err)
 		return
 	}
 
@@ -318,13 +319,14 @@ func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
 	row := stmt.QueryRow(uuid)
 	err = row.Scan(&f.DestructKey, &f.DestructKeySalt)
 	if err != nil {
-		fmt.Fprintf(w, "error is %s", err)
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, "Requested image not found %s", err)
 		return
 	}
 
 	dk, err := scrypt.Key([]byte(destructKey), f.DestructKeySalt, 32768, 8, 1, 32)
 	if err != nil {
-		fmt.Fprintf(w, "error is %s", err)
+		fmt.Fprintf(w, "Internal server error %s", err)
 		return
 	}
 	if bytes.Compare(dk, f.DestructKey) == 0 {
@@ -332,10 +334,12 @@ func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
 		// delete the file
 		err = a.ResourceStorageClient.RemoveObject(bucketName, uuid)
 		if err == nil {
-			http.Redirect(w, r, "/", http.StatusPermanentRedirect)
+			fmt.Fprintf(w, "Image is deleted")
+			return
 		}
 	} else {
-		log.Println("wrong creds")
+		fmt.Fprintf(w, "Possible wrong credentials, please try again.")
+		return
 	}
 }
 
@@ -354,8 +358,6 @@ func main() {
 
 	r.HandleFunc("/i/{id}/destruct", a.deleteFileViewHandler).Methods("GET")
 	r.HandleFunc("/i/{id}/destruct", a.deleteFileHandler).Methods("POST")
-
-	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir(dir))))
 
 	http.Handle("/", csrf.Protect(authKey, csrf.Secure(false))(r))
 

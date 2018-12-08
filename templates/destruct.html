@@ -11,7 +11,7 @@
 
 <body>
     <h1>{{.Caption}}</h1>
-    <form action="/i/{{.Uuid}}" method="post">
+    <form action="/i/{{.Uuid}}/destruct" method="post">
         {{.csrfField}} <label for="destruct-key">Destruct Key</label>
         <input type="password" name="destruct-key" />
         <input type="submit" name="submit" value="Destruct" />
