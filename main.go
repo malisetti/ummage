@@ -350,6 +350,8 @@ func main() {
 		DB: db,
 	}
 
+	CSRF := csrf.Protect(authKey, csrf.Secure(secure))
+
 	r := mux.NewRouter()
 	r.HandleFunc("/", a.indexHandler).Methods("GET")
 	r.HandleFunc("/", a.uploadFileHandler).Methods("POST")
@@ -359,7 +361,7 @@ func main() {
 	r.HandleFunc("/i/{id}/destruct", a.deleteFileViewHandler).Methods("GET")
 	r.HandleFunc("/i/{id}/destruct", a.deleteFileHandler).Methods("POST")
 
-	http.Handle("/", csrf.Protect(authKey, csrf.Secure(false))(r))
+	http.Handle("/", CSRF(r))
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
