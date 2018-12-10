@@ -247,6 +247,7 @@ func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	reqParams := make(url.Values) // TODO: give all the goodies of image serving
 	reqParams.Set("response-content-disposition", "attachment; filename=\\"+f.Name+"\"")
+	reqParams.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 
 	// Generates a presigned url which expires in a day.
 	uploadedAt, err := a.ResourceStorageClient.PresignedGetObject(bucketName, uuid, presignedURLExpiry, reqParams)
