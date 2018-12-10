@@ -8,7 +8,7 @@
   </head>
 
   <body>
-    <h1>{{.Caption}}</h1>
+    <h1>{{.Caption | html }}</h1>
     <ul>
       <li>
         To view the image <a href="/i/{{.Uuid}}" target="_blank">Click here</a>

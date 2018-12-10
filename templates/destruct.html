@@ -9,7 +9,7 @@
   </head>
 
   <body>
-    <h1>{{.Caption}}</h1>
+    <h1>{{.Caption | html}}</h1>
     <form action="/i/{{.Uuid}}/destruct" method="POST">
       {{.csrfField}} <label for="destruct-key">Destruct Key</label>
       <input type="password" name="destruct-key" />
