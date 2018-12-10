@@ -32,7 +32,8 @@ import (
 )
 
 const presignedURLExpiry = time.Second * 1
-const maxAllowedImgSize = 16 << 20
+
+const maxAllowedImgSize = 1 << 20 // bytes
 
 // Make a new bucket called images.
 const bucketName = "resources"
@@ -92,7 +93,6 @@ func init() {
 			id	INTEGER PRIMARY KEY AUTOINCREMENT,
 			uuid TEXT NOT NULL UNIQUE,
 			name TEXT,
-			uploaded_at	TEXT NOT NULL,
 			caption	TEXT,
 			content_type	TEXT NOT NULL,
 			last_visit_on	datetime,
@@ -132,7 +132,7 @@ func getRandomBytes(n int) ([]byte, error) {
 func (a *app) indexHandler(w http.ResponseWriter, r *http.Request) {
 	// serve form to upload a single image with caption
 	p := map[string]interface{}{
-		"Title":          "Ummimg",
+		"Title":          "Ummage",
 		"Headline":       "Upload Image",
 		"Information":    fmt.Sprintf("Max allowed upload size is %dmb", maxAllowedImgSize/(1024*1024)),
 		csrf.TemplateTag: csrf.TemplateField(r),
@@ -148,11 +148,19 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	u := uuid.Must(uuid.NewV4())
 	f.UUID = u.String()
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxAllowedImgSize)
 	err := r.ParseMultipartForm(maxAllowedImgSize)
 	if err != nil {
 		fmt.Fprintf(w, "Can not handle images bigger than %dmb, failed with %s", maxAllowedImgSize/(1024*1024), err)
 		return
 	}
+
+	file, handler, err := r.FormFile("resource")
+	if err != nil {
+		fmt.Fprintf(w, "Can not handle images bigger than %dmb, failed with %s", maxAllowedImgSize/(1024*1024), err)
+		return
+	}
+	defer file.Close()
 
 	destructKey := r.FormValue("destruct-key")
 
@@ -173,13 +181,6 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 		f.Caption = strings.TrimSpace(caption)
 	}
 
-	file, handler, err := r.FormFile("resource")
-	if err != nil {
-		fmt.Fprintf(w, "Failed to receive img. Caused error is %s", err)
-		return
-	}
-	defer file.Close()
-
 	fileType := handler.Header.Get("Content-Type")
 	if !strings.HasPrefix(fileType, "image/") {
 		fmt.Fprintf(w, "Could not determine the file type %s, please retry.", handler.Header.Get(""))
@@ -193,7 +194,7 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	f.Name = handler.Filename
 
-	_, err = a.ResourceStorageClient.PutObjectWithContext(r.Context(), bucketName, u.String(), file, handler.Size, minio.PutObjectOptions{UserMetadata: userMetadata, ContentType: fileType, ContentDisposition: handler.Header.Get("Content-Disposition")})
+	_, err = a.ResourceStorageClient.PutObjectWithContext(r.Context(), bucketName, u.String(), file, handler.Size, minio.PutObjectOptions{UserMetadata: userMetadata, ContentType: fileType, CacheControl: "no-cache, no-store, must-revalidate", ContentDisposition: handler.Header.Get("Content-Disposition")})
 
 	if err != nil {
 		fmt.Fprintf(w, "Internal server error %s", err)
@@ -215,7 +216,7 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	// show upload response page
 	p := map[string]interface{}{
-		"Title":   "Ummimg",
+		"Title":   "Ummage",
 		"Caption": f.Caption,
 		"Uuid":    f.UUID,
 	}
@@ -227,7 +228,7 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	stmt, err := a.DB.Prepare("select name, uploaded_at, caption, content_type from resource where uuid = ?")
+	stmt, err := a.DB.Prepare("select name, caption, content_type from resource where uuid = ?")
 	if err != nil {
 		fmt.Fprintf(w, "error is %s", err)
 		return
@@ -256,7 +257,7 @@ func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p := map[string]interface{}{
-		"Title":          "Ummimg",
+		"Title":          "Ummage",
 		"Caption":        f.Caption,
 		"Src":            uploadedAt,
 		"Uuid":           uuid,
@@ -288,8 +289,9 @@ func (a *app) deleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p := map[string]interface{}{
-		"Title":          "Ummimg",
+		"Title":          "Ummage",
 		"Caption":        caption,
+		"Uuid":           uuid,
 		csrf.TemplateTag: csrf.TemplateField(r),
 	}
 
@@ -302,7 +304,8 @@ func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	destructKey := r.FormValue("destruct-key")
 	if len(destructKey) == 0 {
-		log.Println("stay on the same page with error")
+		fmt.Fprintf(w, "Please retry with a non empty destruct key")
+		return
 	}
 
 	stmt, err := a.DB.Prepare("select destruct_key, destruct_key_salt from resource where uuid = ?")
@@ -347,10 +350,10 @@ func main() {
 	defer db.Close()
 	a := &app{
 		ResourceStorageClient: minioClient,
-		DB: db,
+		DB:                    db,
 	}
 
-	CSRF := csrf.Protect(authKey, csrf.Secure(secure))
+	CSRF := csrf.Protect(authKey, csrf.FieldName("Ummage-csrf"), csrf.CookieName("Ummage-cookie"), csrf.Secure(secure))
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", a.indexHandler).Methods("GET")

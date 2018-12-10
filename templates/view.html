@@ -1,37 +1,48 @@
 <!DOCTYPE html>
 <html lang="en">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <meta http-equiv="Cache-control" content="no-cache" />
+    <meta http-equiv="Expires" content="-1" />
+    <title>{{.Title}}</title>
+  </head>
 
-<head>
-  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="ie=edge">
-  <title>{{.Title}}</title>
-</head>
+  <body>
+    <noscript>Ummage needs JavaScript!</noscript>
+    <h1>{{.Caption}}</h1>
+    <img
+      style="width: 100%;
+      height: 100vh;
+      object-fit: contain;
+      object-position: top center;"
+      src="{{.Src}}"
+      id="x-image"
+      alt="{{.Caption}}"
+    />
 
-<body>
-  <h1>{{.Caption}}</h1>
-  <img src="{{.Src}}" id="x-image" alt="{{.Caption}}" />
+    <script type="text/javascript">
+      function randomIntFromInterval(min, max, choice) {
+        // min and max included
+        switch (choice) {
+          case 1:
+            return Math.floor(Math.random() * max) + min;
 
-  <script type="text/javascript">
-    function randomIntFromInterval(min, max, choice) // min and max included
-    {
-      switch (choice) {
-        case 1:
-          return Math.floor(Math.random() * max) + min
-
-        default:
-          return Math.floor(Math.random() * (max - min + 1) + min);
+          default:
+            return Math.floor(Math.random() * (max - min + 1) + min);
+        }
       }
-    }
-    const ximg = document.getElementById("x-image");
-    ximg.onload = function () {
-      setTimeout(() => {
-        const body = document.getElementsByTagName("BODY")[0];
-        body.innerHTML = "";
+      const ximg = document.getElementById("x-image");
+      ximg.onerror = event => {
+        alert("reload page");
+      };
 
-      }, randomIntFromInterval(200, 300, Date.now() % 2)); //Math.floor(Math.random() * 6) + 300
-    };
-  </script>
-</body>
-
+      ximg.onload = event => {
+        setTimeout(() => {
+          ximg.style.filter = "blur(20px)";
+        }, randomIntFromInterval(200, 300, Date.now() % 2));
+      };
+    </script>
+  </body>
 </html>
