@@ -194,7 +194,7 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	f.Name = handler.Filename
 
-	_, err = a.ResourceStorageClient.PutObjectWithContext(r.Context(), bucketName, u.String(), file, handler.Size, minio.PutObjectOptions{UserMetadata: userMetadata, ContentType: fileType, CacheControl: "no-cache, no-store, must-revalidate", ContentDisposition: handler.Header.Get("Content-Disposition")})
+	_, err = a.ResourceStorageClient.PutObjectWithContext(r.Context(), bucketName, u.String(), file, handler.Size, minio.PutObjectOptions{UserMetadata: userMetadata, ContentType: fileType, CacheControl: "private, max-age=-1, no-cache, no-store, must-revalidate", ContentDisposition: handler.Header.Get("Content-Disposition")})
 
 	if err != nil {
 		fmt.Fprintf(w, "Internal server error %s", err)
@@ -247,7 +247,7 @@ func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	reqParams := make(url.Values) // TODO: give all the goodies of image serving
 	reqParams.Set("response-content-disposition", "attachment; filename=\\"+f.Name+"\"")
-	reqParams.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	reqParams.Set("Cache-Control", "private, max-age=-1, no-cache, no-store, must-revalidate")
 
 	// Generates a presigned url which expires in a day.
 	uploadedAt, err := a.ResourceStorageClient.PresignedGetObject(bucketName, uuid, presignedURLExpiry, reqParams)

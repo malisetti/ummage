@@ -40,11 +40,11 @@
 
       ximg.onload = event => {
         setTimeout(() => {
-          const body = document.getElementsByTagName("BODY")[0];
-          while (body.firstChild) {
-            body.removeChild(body.firstChild);
-          }
-          // ximg.style.filter = "blur(20px)";
+          // const body = document.getElementsByTagName("BODY")[0];
+          // while (body.firstChild) {
+          //   body.removeChild(body.firstChild);
+          // }
+          ximg.style.filter = "blur(20px)";
         }, 500); //randomIntFromInterval(200, 300, Date.now() % 2)
       };
     </script>
