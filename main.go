@@ -334,7 +334,13 @@ func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if bytes.Compare(dk, f.DestructKey) == 0 {
-		_, err = a.DB.Exec("DELETE FROM resource WHERE uuid = ?;", uuid)
+		stmt, err := a.DB.Prepare("DELETE FROM resource WHERE uuid = ?;")
+		if err != nil {
+			fmt.Fprintf(w, "Internal server error %s", err)
+			return
+		}
+		defer stmt.Close()
+		_, err = stmt.Exec(uuid)
 		// delete the file
 		err = a.ResourceStorageClient.RemoveObject(bucketName, uuid)
 		if err == nil {
@@ -351,7 +357,7 @@ func main() {
 	defer db.Close()
 	a := &app{
 		ResourceStorageClient: minioClient,
-		DB:                    db,
+		DB: db,
 	}
 
 	CSRF := csrf.Protect(authKey, csrf.FieldName("Ummage-csrf"), csrf.CookieName("Ummage-cookie"), csrf.Secure(secure))
