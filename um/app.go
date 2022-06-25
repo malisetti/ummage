@@ -18,6 +18,20 @@ import (
 	"golang.org/x/crypto/scrypt"
 )
 
+var (
+	indexTmpl,
+	uploadResponseTmpl,
+	viewTmpl,
+	destructTmpl *template.Template
+)
+
+func init() {
+	indexTmpl = template.Must(template.ParseFiles("templates/index.html"))
+	uploadResponseTmpl = template.Must(template.ParseFiles("templates/upload-response.html"))
+	viewTmpl = template.Must(template.ParseFiles("templates/view.html"))
+	destructTmpl = template.Must(template.ParseFiles("templates/destruct.html"))
+}
+
 type App struct {
 	DB                    *sql.DB
 	ResourceStorageClient *minio.Client
@@ -42,8 +56,7 @@ func (a *App) IndexHandler(w http.ResponseWriter, r *http.Request) {
 		csrf.TemplateTag: csrf.TemplateField(r),
 	}
 
-	t, _ := template.ParseFiles("templates/index.html")
-	t.Execute(w, p)
+	indexTmpl.Execute(w, p)
 }
 
 func (a *App) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +100,8 @@ func (a *App) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	fileType := handler.Header.Get("Content-Type")
 	if !strings.HasPrefix(fileType, "image/") {
-		fmt.Fprintf(w, "Could not determine the file type %s, please retry.", handler.Header.Get(""))
+		fmt.Fprintf(w, "Could not determine the file type %s, accepted types are image/*\n", fileType)
+		return
 	}
 
 	f.ContentType = fileType
@@ -125,8 +139,7 @@ func (a *App) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 		"Uuid":    f.UUID,
 	}
 
-	t, _ := template.ParseFiles("templates/upload-response.html")
-	t.Execute(w, p)
+	uploadResponseTmpl.Execute(w, p)
 }
 
 func (a *App) ViewFileHandler(w http.ResponseWriter, r *http.Request) {
@@ -169,8 +182,7 @@ func (a *App) ViewFileHandler(w http.ResponseWriter, r *http.Request) {
 		csrf.TemplateTag: csrf.TemplateField(r),
 	}
 
-	t, _ := template.ParseFiles("templates/view.html")
-	t.Execute(w, p)
+	viewTmpl.Execute(w, p)
 }
 
 func (a *App) DeleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
@@ -200,8 +212,7 @@ func (a *App) DeleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
 		csrf.TemplateTag: csrf.TemplateField(r),
 	}
 
-	t, _ := template.ParseFiles("templates/destruct.html")
-	t.Execute(w, p)
+	destructTmpl.Execute(w, p)
 }
 
 func (a *App) DeleteFileHandler(w http.ResponseWriter, r *http.Request) {

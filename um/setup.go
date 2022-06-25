@@ -49,6 +49,6 @@ func SetupDB(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	log.Println("create table executed")
+	log.Println("Create table executed")
 	return db, nil
 }
