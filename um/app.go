@@ -1,18 +1,8 @@
-package main
-
-// upload img
-// choose deletion criteria
-// option to delete using a password
-// view img
-// be simple
-// be short
-// be less enough
+package um
 
 import (
 	"bytes"
-	"crypto/rand"
 	"database/sql"
-	"flag"
 	"fmt"
 	"html/template"
 	"log"
@@ -23,118 +13,32 @@ import (
 
 	"github.com/gorilla/csrf"
 	"github.com/gorilla/mux"
-	_ "github.com/mattn/go-sqlite3"
 	minio "github.com/minio/minio-go"
-	"github.com/mseshachalam/ummage/pkg/resource"
-	"github.com/satori/go.uuid"
+	uuid "github.com/satori/go.uuid"
 	"golang.org/x/crypto/scrypt"
-	"golang.org/x/sync/errgroup"
 )
 
-const presignedURLExpiry = time.Second * 1
-
-const maxAllowedImgSize = 1 << 20 // bytes
-
-// Make a new bucket called images.
-const bucketName = "resources"
-
-const endpoint = "localhost:9000"
-const accessKeyID = "AKIAIOSFODNN7EXAMPLE"
-const secretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-
-const location = "us-east-1"
-
-var dir string
-var secure bool
-var authKey []byte
-var minioClient *minio.Client
-var db *sql.DB
-
-func init() {
-	var g errgroup.Group
-
-	g.Go(func() (err error) {
-		flag.StringVar(&dir, "dir", ".", "the directory to serve files from. Defaults to the current dir")
-		flag.BoolVar(&secure, "secure", false, "weather the app is running on tls or not")
-
-		// Initialize minio client object.
-		minioClient, err = minio.New(endpoint, accessKeyID, secretAccessKey, secure)
-		if err != nil {
-			return
-		}
-
-		err = minioClient.MakeBucket(bucketName, location)
-		if err != nil {
-			// Check to see if we already own this bucket (which happens if you run this twice)
-			exists, err := minioClient.BucketExists(bucketName)
-			if err == nil && exists {
-				log.Printf("We already own %s\n", bucketName)
-			} else {
-				return err
-			}
-		}
-
-		log.Printf("Successfully created %s\n", bucketName)
-		return nil
-	})
-
-	g.Go(func() (err error) {
-		authKey, err = getRandomBytes(32)
-		return
-	})
-
-	g.Go(func() (err error) {
-		db, err = sql.Open("sqlite3", "./app.db")
-		if err != nil {
-			return
-		}
-
-		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS resource (
-			id	INTEGER PRIMARY KEY AUTOINCREMENT,
-			uuid TEXT NOT NULL UNIQUE,
-			name TEXT,
-			caption	TEXT,
-			content_type	TEXT NOT NULL,
-			last_visit_on	datetime,
-			destruct_key	BLOB,
-			destruct_key_salt	BLOB
-		);`)
-		if err != nil {
-			return
-		}
-
-		log.Printf("create table executed")
-
-		return
-	})
-
-	err := g.Wait()
-	if err != nil {
-		panic(err)
-	}
-}
-
-type app struct {
+type App struct {
 	DB                    *sql.DB
 	ResourceStorageClient *minio.Client
+	MaxAllowedImgSize     int64
+	BucketName            string
+	PresignedURLExpiry    time.Duration
 }
 
-func getRandomBytes(n int) ([]byte, error) {
-	randomBuf := make([]byte, 32)
-	_, err := rand.Read(randomBuf)
+func (a *App) Shutdown() {
+	err := a.DB.Close()
 	if err != nil {
-		return nil, err
+		log.Printf("failed to close db %v\n", err)
 	}
-
-	return randomBuf, nil
 }
 
-func (a *app) indexHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) IndexHandler(w http.ResponseWriter, r *http.Request) {
 	// serve form to upload a single image with caption
 	p := map[string]interface{}{
 		"Title":          "Ummage",
 		"Headline":       "Upload Image",
-		"Information":    fmt.Sprintf("Max allowed upload size is %dmb", maxAllowedImgSize/(1024*1024)),
+		"Information":    fmt.Sprintf("Max allowed upload size is %dmb", a.MaxAllowedImgSize/(1024*1024)),
 		csrf.TemplateTag: csrf.TemplateField(r),
 	}
 
@@ -142,22 +46,22 @@ func (a *app) indexHandler(w http.ResponseWriter, r *http.Request) {
 	t.Execute(w, p)
 }
 
-func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
-	var f resource.Resource
+func (a *App) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
+	var f Resource
 
-	u := uuid.Must(uuid.NewV4())
+	u := uuid.NewV4()
 	f.UUID = u.String()
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxAllowedImgSize)
-	err := r.ParseMultipartForm(maxAllowedImgSize)
+	r.Body = http.MaxBytesReader(w, r.Body, a.MaxAllowedImgSize)
+	err := r.ParseMultipartForm(a.MaxAllowedImgSize)
 	if err != nil {
-		fmt.Fprintf(w, "Can not handle images bigger than %dmb, failed with %s", maxAllowedImgSize/(1024*1024), err)
+		fmt.Fprintf(w, "Can not handle images bigger than %dmb, failed with %s", a.MaxAllowedImgSize/(1024*1024), err)
 		return
 	}
 
 	file, handler, err := r.FormFile("resource")
 	if err != nil {
-		fmt.Fprintf(w, "Can not handle images bigger than %dmb, failed with %s", maxAllowedImgSize/(1024*1024), err)
+		fmt.Fprintf(w, "Can not handle images bigger than %dmb, failed with %s", a.MaxAllowedImgSize/(1024*1024), err)
 		return
 	}
 	defer file.Close()
@@ -165,7 +69,7 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	destructKey := r.FormValue("destruct-key")
 
 	if len(destructKey) != 0 {
-		destructKeySalt, err := getRandomBytes(32)
+		destructKeySalt, err := GetRandomBytes(32)
 		if err != nil {
 			fmt.Fprintf(w, "Internal server error %s", err)
 			return
@@ -194,7 +98,7 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	f.Name = handler.Filename
 
-	_, err = a.ResourceStorageClient.PutObjectWithContext(r.Context(), bucketName, u.String(), file, handler.Size, minio.PutObjectOptions{UserMetadata: userMetadata, ContentType: fileType, CacheControl: "private, max-age=-1, no-cache, no-store, must-revalidate", ContentDisposition: handler.Header.Get("Content-Disposition")})
+	_, err = a.ResourceStorageClient.PutObjectWithContext(r.Context(), a.BucketName, u.String(), file, handler.Size, minio.PutObjectOptions{UserMetadata: userMetadata, ContentType: fileType, CacheControl: "private, max-age=-1, no-cache, no-store, must-revalidate", ContentDisposition: handler.Header.Get("Content-Disposition")})
 
 	if err != nil {
 		fmt.Fprintf(w, "Internal server error %s", err)
@@ -225,7 +129,7 @@ func (a *app) uploadFileHandler(w http.ResponseWriter, r *http.Request) {
 	t.Execute(w, p)
 }
 
-func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) ViewFileHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
 	stmt, err := a.DB.Prepare("select name, caption, content_type from resource where uuid = ?")
@@ -234,7 +138,7 @@ func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var f resource.Resource
+	var f Resource
 
 	uuid := vars["id"]
 	row := stmt.QueryRow(uuid)
@@ -250,7 +154,7 @@ func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 	reqParams.Set("Cache-Control", "private, max-age=-1, no-cache, no-store, must-revalidate")
 
 	// Generates a presigned url which expires in a day.
-	uploadedAt, err := a.ResourceStorageClient.PresignedGetObject(bucketName, uuid, presignedURLExpiry, reqParams)
+	uploadedAt, err := a.ResourceStorageClient.PresignedGetObject(a.BucketName, uuid, a.PresignedURLExpiry, reqParams)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "Internal server error %s", err)
@@ -269,7 +173,7 @@ func (a *app) viewFileHandler(w http.ResponseWriter, r *http.Request) {
 	t.Execute(w, p)
 }
 
-func (a *app) deleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) DeleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
 	uuid := vars["id"]
@@ -300,7 +204,7 @@ func (a *app) deleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
 	t.Execute(w, p)
 }
 
-func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
+func (a *App) DeleteFileHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
 	destructKey := r.FormValue("destruct-key")
@@ -316,7 +220,7 @@ func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var f resource.Resource
+	var f Resource
 
 	uuid := vars["id"]
 
@@ -333,7 +237,7 @@ func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Internal server error %s", err)
 		return
 	}
-	if bytes.Compare(dk, f.DestructKey) == 0 {
+	if bytes.Equal(dk, f.DestructKey) {
 		stmt, err := a.DB.Prepare("DELETE FROM resource WHERE uuid = ?;")
 		if err != nil {
 			fmt.Fprintf(w, "Internal server error %s", err)
@@ -341,8 +245,12 @@ func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		defer stmt.Close()
 		_, err = stmt.Exec(uuid)
+		if err != nil {
+			fmt.Fprintf(w, "Internal server error %s", err)
+			return
+		}
 		// delete the file
-		err = a.ResourceStorageClient.RemoveObject(bucketName, uuid)
+		err = a.ResourceStorageClient.RemoveObject(a.BucketName, uuid)
 		if err == nil {
 			fmt.Fprintf(w, "Image is deleted")
 			return
@@ -351,27 +259,4 @@ func (a *app) deleteFileHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Possible wrong credentials, please try again.")
 		return
 	}
-}
-
-func main() {
-	defer db.Close()
-	a := &app{
-		ResourceStorageClient: minioClient,
-		DB: db,
-	}
-
-	CSRF := csrf.Protect(authKey, csrf.FieldName("Ummage-csrf"), csrf.CookieName("Ummage-cookie"), csrf.Secure(secure))
-
-	r := mux.NewRouter()
-	r.HandleFunc("/", a.indexHandler).Methods("GET")
-	r.HandleFunc("/", a.uploadFileHandler).Methods("POST")
-
-	r.HandleFunc("/i/{id}", a.viewFileHandler).Methods("GET")
-
-	r.HandleFunc("/i/{id}/destruct", a.deleteFileViewHandler).Methods("GET")
-	r.HandleFunc("/i/{id}/destruct", a.deleteFileHandler).Methods("POST")
-
-	http.Handle("/", CSRF(r))
-
-	log.Fatal(http.ListenAndServe(":8080", nil))
 }

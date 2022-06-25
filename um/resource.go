@@ -1,4 +1,4 @@
-package resource
+package um
 
 import (
 	"bytes"
@@ -8,31 +8,30 @@ import (
 )
 
 const (
-	imageFile = "image"
-	audioFile = "audio"
-	videoFile = "video"
+	ImageFile = "image"
+	AudioFile = "audio"
+	VideoFile = "video"
 )
 
-type deletionChoice int
+type DeletionChoice int
 
 const (
 	_                           = iota
-	deleteOnTime deletionChoice = iota + 1
-	deleteOnKeyIn
+	DeleteOnTime DeletionChoice = iota + 1
+	DeleteOnKeyIn
 )
 
-func (dc deletionChoice) String() string {
+func (dc DeletionChoice) String() string {
 	switch dc {
-	case deleteOnKeyIn:
+	case DeleteOnKeyIn:
 		return "key-based"
-	case deleteOnTime:
+	case DeleteOnTime:
 		return "time-based"
 	default:
-		return ""
+		return "unknown-deletion-choice"
 	}
 }
 
-// Resource is bs
 type Resource struct {
 	ID int
 
@@ -45,14 +44,14 @@ type Resource struct {
 	DestructKeySalt []byte // treat this as password
 }
 
-func (r *Resource) canDelete(choice deletionChoice, deletionPassword []byte) (bool, error) {
+func (r *Resource) CanDelete(choice DeletionChoice, deletionPassword []byte) (bool, error) {
 	switch choice {
-	case deleteOnKeyIn:
+	case DeleteOnKeyIn:
 		dk, err := scrypt.Key(r.DestructKey, r.DestructKeySalt, 32768, 8, 1, 32)
 		if err != nil {
 			return false, fmt.Errorf("cryptographic function failed with %s", err.Error())
 		}
-		if bytes.Compare(dk, r.DestructKey) == 0 {
+		if bytes.Equal(dk, r.DestructKey) {
 			return true, nil
 		}
 		return false, fmt.Errorf("can not delete the img using the given key")
