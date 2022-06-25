@@ -18,18 +18,10 @@ import (
 	"golang.org/x/crypto/scrypt"
 )
 
-var (
-	indexTmpl,
-	uploadResponseTmpl,
-	viewTmpl,
-	destructTmpl *template.Template
-)
+var templates *template.Template
 
 func init() {
-	indexTmpl = template.Must(template.ParseFiles("templates/index.html"))
-	uploadResponseTmpl = template.Must(template.ParseFiles("templates/upload-response.html"))
-	viewTmpl = template.Must(template.ParseFiles("templates/view.html"))
-	destructTmpl = template.Must(template.ParseFiles("templates/destruct.html"))
+	templates = template.Must(template.ParseGlob("templates/*.html"))
 }
 
 type App struct {
@@ -56,7 +48,7 @@ func (a *App) IndexHandler(w http.ResponseWriter, r *http.Request) {
 		csrf.TemplateTag: csrf.TemplateField(r),
 	}
 
-	indexTmpl.Execute(w, p)
+	templates.ExecuteTemplate(w, "index.html", p)
 }
 
 func (a *App) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +131,7 @@ func (a *App) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 		"Uuid":    f.UUID,
 	}
 
-	uploadResponseTmpl.Execute(w, p)
+	templates.ExecuteTemplate(w, "upload-response.html", p)
 }
 
 func (a *App) ViewFileHandler(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +174,7 @@ func (a *App) ViewFileHandler(w http.ResponseWriter, r *http.Request) {
 		csrf.TemplateTag: csrf.TemplateField(r),
 	}
 
-	viewTmpl.Execute(w, p)
+	templates.ExecuteTemplate(w, "view.html", p)
 }
 
 func (a *App) DeleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
@@ -212,7 +204,7 @@ func (a *App) DeleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
 		csrf.TemplateTag: csrf.TemplateField(r),
 	}
 
-	destructTmpl.Execute(w, p)
+	templates.ExecuteTemplate(w, "destruct.html", p)
 }
 
 func (a *App) DeleteFileHandler(w http.ResponseWriter, r *http.Request) {
