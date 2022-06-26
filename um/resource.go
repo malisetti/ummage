@@ -2,6 +2,7 @@ package um
 
 import (
 	"bytes"
+	"database/sql"
 	"fmt"
 
 	"golang.org/x/crypto/scrypt"
@@ -59,4 +60,24 @@ func (r *Resource) CanDelete(choice DeletionChoice, deletionPassword []byte) (bo
 	default:
 		return false, fmt.Errorf("only one way exists to delete the resource")
 	}
+}
+
+func (r *Resource) Add(tx *sql.Tx) (sql.Result, error) {
+	stmt, err := tx.Prepare(`INSERT INTO resource(uuid, name, caption, content_type, destruct_key, destruct_key_salt) VALUES(?,?,?,?,?,?)`)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	return stmt.Exec(r.UUID, r.Name, r.Caption, r.ContentType, r.DestructKey, r.DestructKeySalt)
+}
+
+func (r *Resource) Delete(tx *sql.Tx) (sql.Result, error) {
+	stmt, err := tx.Prepare("DELETE FROM resource WHERE uuid = ?;")
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	return stmt.Exec(r.UUID)
 }

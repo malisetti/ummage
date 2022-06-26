@@ -3,6 +3,7 @@ package um
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -111,15 +112,29 @@ func (a *App) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stmt, err := a.DB.Prepare(`INSERT INTO resource(uuid, name, caption, content_type, destruct_key, destruct_key_salt) values(?,?,?,?,?,?)`)
+	tx, err := a.DB.BeginTx(r.Context(), nil)
 	if err != nil {
 		fmt.Fprintf(w, "Internal server error %s", err)
 		return
 	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(f.UUID, f.Name, f.Caption, f.ContentType, f.DestructKey, f.DestructKeySalt)
+	_, err = (&f).Add(tx)
 	if err != nil {
+		fmt.Fprintf(w, "Internal server error %s", err)
+		return
+	}
+
+	defer func() {
+		err := tx.Rollback()
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
+			// delete file from minio
+			err = a.ResourceStorageClient.RemoveObject(a.BucketName, f.UUID)
+			if err != nil {
+				log.Printf("Deleting object %s failed %s\n", f.UUID, err)
+			}
+		}
+	}()
+	// Commit the transaction.
+	if err = tx.Commit(); err != nil {
 		fmt.Fprintf(w, "Internal server error %s", err)
 		return
 	}
@@ -137,7 +152,7 @@ func (a *App) UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 func (a *App) ViewFileHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 
-	stmt, err := a.DB.Prepare("select name, caption, content_type from resource where uuid = ?")
+	stmt, err := a.DB.Prepare("SELECT name, caption, content_type FROM resource WHERE uuid = ?")
 	if err != nil {
 		fmt.Fprintf(w, "error is %s", err)
 		return
@@ -182,7 +197,7 @@ func (a *App) DeleteFileViewHandler(w http.ResponseWriter, r *http.Request) {
 
 	uuid := vars["id"]
 
-	stmt, err := a.DB.Prepare("select caption from resource where uuid = ?")
+	stmt, err := a.DB.Prepare("SELECT caption FROM resource WHERE uuid = ?")
 	if err != nil {
 		fmt.Fprintf(w, "Internal server error %s", err)
 		return
@@ -216,7 +231,7 @@ func (a *App) DeleteFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stmt, err := a.DB.Prepare("select destruct_key, destruct_key_salt from resource where uuid = ?")
+	stmt, err := a.DB.Prepare("SELECT destruct_key, destruct_key_salt FROM resource WHERE uuid = ?")
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "Internal server error %s", err)
@@ -241,14 +256,25 @@ func (a *App) DeleteFileHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if bytes.Equal(dk, f.DestructKey) {
-		stmt, err := a.DB.Prepare("DELETE FROM resource WHERE uuid = ?;")
+		tx, err := a.DB.BeginTx(r.Context(), nil)
 		if err != nil {
 			fmt.Fprintf(w, "Internal server error %s", err)
 			return
 		}
-		defer stmt.Close()
-		_, err = stmt.Exec(uuid)
+
+		defer func() {
+			err := tx.Rollback()
+			if err != nil && !errors.Is(err, sql.ErrTxDone) {
+
+			}
+		}()
+		_, err = (&f).Delete(tx)
 		if err != nil {
+			fmt.Fprintf(w, "Internal server error %s", err)
+			return
+		}
+		// Commit the transaction.
+		if err = tx.Commit(); err != nil {
 			fmt.Fprintf(w, "Internal server error %s", err)
 			return
 		}
@@ -256,6 +282,9 @@ func (a *App) DeleteFileHandler(w http.ResponseWriter, r *http.Request) {
 		err = a.ResourceStorageClient.RemoveObject(a.BucketName, uuid)
 		if err == nil {
 			fmt.Fprintf(w, "Image is deleted")
+			return
+		} else {
+			fmt.Fprintf(w, "Internal server error %s", err)
 			return
 		}
 	} else {
